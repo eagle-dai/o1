@@ -19,8 +19,12 @@ source ./venv/bin/activate
 ## Install dependencies
 ```bash
 python -m pip install --upgrade pip
-
-cd my_src
-pip install -r requirements.txt
+pip install -r my_src/requirements.txt
 ```
 
+## Run the code
+
+Example:
+```bash
+streamlit run  my_src/app_langchain.py
+```
