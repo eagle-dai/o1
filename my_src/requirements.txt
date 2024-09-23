@@ -4,6 +4,7 @@ streamlit
 python-dotenv
 requests
 langchain
+langchain_core
 langchain_openai
 
 python-dotenv
