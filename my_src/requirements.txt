@@ -1,6 +1,10 @@
+# pip install -r my_src/requirements.txt
+
 streamlit
-groq
 python-dotenv
 requests
-blessed
-openai
+langchain
+langchain_openai
+
+python-dotenv
+ipykernel # for jupyter notebook

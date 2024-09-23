@@ -1,22 +1,34 @@
 import streamlit as st
-import openai
-import os
 import json
 import time
+import os
+from langchain import PromptTemplate, LLMChain
+from langchain_openai import AzureChatOpenAI
 
-client = openai.OpenAI()  # Initialize the OpenAI client
+# Initialize the LLM
+llm = AzureChatOpenAI(
+    azure_endpoint = os.getenv("BASE_URL"),
+    openai_api_version = os.getenv("API_VERSION"),
+    deployment_name = os.getenv("DEPLOYMENT_NAME"),
+    openai_api_key = os.getenv("API_KEY"),
+    temperature = 0
+)
 
 def make_api_call(messages, max_tokens, is_final_answer=False):
     for attempt in range(3):
         try:
-            response = client.chat.completions.create(
-                model="gpt-4o",  # Using GPT-3.5 Turbo, adjust as needed
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=0.2,
-                response_format={"type": "json_object"}
-            )
-            return json.loads(response.choices[0].message.content)
+            # Create a prompt template for LangChain
+            prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            template = PromptTemplate(template="{prompt}", input_variables=["prompt"])
+
+            # Set up LLMChain with the OpenAI model and the prompt
+            llm_chain = LLMChain(llm=llm, prompt=template)
+
+            # Generate response using LLMChain
+            response = llm_chain.run({"prompt": prompt})
+
+            # Parse response as JSON (assuming it's properly structured)
+            return json.loads(response)
         except Exception as e:
             if attempt == 2:
                 if is_final_answer:
@@ -48,8 +60,7 @@ Key Instructions:
 - Incorporate relevant domain knowledge and best practices in your reasoning.
 - Quantify certainty levels for each step and the final conclusion when applicable.
 - Consider potential edge cases or exceptions to your reasoning.
-- Provide clear justifications for eliminating alternative hypotheses.
-
+- Provide clear justifications for eliminating alternative hypotheses. 
 
 Example of a valid JSON response:
 ```json
@@ -57,8 +68,7 @@ Example of a valid JSON response:
     "title": "Initial Problem Analysis",
     "content": "To approach this problem effectively, I'll first break down the given information into key components. This involves identifying...[detailed explanation]... By structuring the problem this way, we can systematically address each aspect.",
     "next_action": "continue"
-}```
-"""},
+}```"""},
         {"role": "user", "content": prompt},
         {"role": "assistant",
          "content": "Thank you! I will now think step by step following my instructions, starting at the beginning after decomposing the problem."}
@@ -101,16 +111,13 @@ Example of a valid JSON response:
     yield steps, total_thinking_time
 
 def main():
-    st.set_page_config(page_title="OpenAI OpenAI Reasoning Chains", page_icon="🧠", layout="wide")
+    st.set_page_config(page_title="LangChain OpenAI Reasoning Chains", page_icon="🧠", layout="wide")
 
-    st.title("Using OpenAI to create reasoning chains")
+    st.title("Using LangChain to create reasoning chains")
 
     st.markdown("""
-    This is a prototype using OpenAI's OpenAI model to create reasoning chains for improved output accuracy. 
+    This is a prototype using LangChain's OpenAI model to create reasoning chains for improved output accuracy. 
     The accuracy has not been formally evaluated yet.
-
-    Forked from [bklieger-groq](https://github.com/bklieger-groq)
-    Open source [repository here](https://github.com/win4r/o1)
     """)
 
     # Text input for user query
