@@ -4,7 +4,7 @@ import time
 import os
 
 from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import AzureChatOpenAI
 
 # Initialize the LLM
@@ -20,7 +20,10 @@ llm = AzureChatOpenAI(
 prompt = PromptTemplate(template="{prompt}", input_variables=["prompt"])
 
 # Create a LangChain pipeline
-llm_chain = prompt | llm | StrOutputParser()
+llm_chain = prompt | llm | JsonOutputParser()
+
+# Create a prompt template for LangChain
+prompt = PromptTemplate(template="{prompt}", input_variables=["prompt"])
 
 def make_api_call(messages, max_tokens, is_final_answer=False):
     # print('--- make_api_call ---\n-- messages:', json.dumps(messages, indent=4))
@@ -29,22 +32,15 @@ def make_api_call(messages, max_tokens, is_final_answer=False):
         try:
             # Create a prompt content string
             prompt_content = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-            print("-- prompt_content:\n", prompt_content)
+            # print("-- prompt content:\n", prompt_content)
 
             # Generate response
             response = llm_chain.invoke({"prompt": prompt_content})
-            print('-- Raw response:\n', response)
+            # print('-- raw response:\n', response)
 
-            # Extract the first JSON object from the response
-            start = response.find('[')
-            end = response.rfind(']') + 1
-            json_str = response[start:end].strip()
-            print('-- Extracted JSON:\n', json_str)
-
-            # Parse response as JSON (assuming it's properly structured)
-            return json.loads(json_str)
+            return response
         except Exception as e:
-            if True: # if attempt == 2:
+            if attempt == 2:
                 if is_final_answer:
                     return {"title": "Error",
                             "content": f"Failed to generate final answer after 3 attempts. Error: {str(e)}"}
@@ -98,19 +94,23 @@ Example of a valid JSON response:
 
     while True:
         start_time = time.time()
-        step_data = make_api_call(messages, 300)
+        more_steps = make_api_call(messages, 300)
         end_time = time.time()
         thinking_time = end_time - start_time
         total_thinking_time += thinking_time
 
-        steps.append((f"Step {step_count}: {step_data['title']}", step_data['content'], thinking_time))
+        final_answer = False
+        for step_data in more_steps:
+            steps.append((f"Step {step_count}: {step_data['title']}", step_data['content'], thinking_time))
+            messages.append({"role": "assistant", "content": json.dumps(step_data)})
 
-        messages.append({"role": "assistant", "content": json.dumps(step_data)})
+            if step_data['next_action'] == 'final_answer':
+                final_answer = True
+                break
+            step_count += 1
 
-        if step_data['next_action'] == 'final_answer':
+        if final_answer:
             break
-
-        step_count += 1
 
         # Yield after each step for Streamlit to update
         yield steps, None  # We're not yielding the total time until the end
@@ -178,8 +178,5 @@ def debug_main(user_query):
             print(f"**Total thinking time: {total_thinking_time:.2f} seconds**")
 
 if __name__ == "__main__":
-    if 'STREAMLIT_SERVER_PORT' in os.environ:
-        main()
-    else:
-        user_query = "compare real number 3.11 and 3.8"
-        debug_main(user_query)
+    # debug_main("compare real number 3.11 and 3.8") # for testing
+    main()
