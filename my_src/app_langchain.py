@@ -28,24 +28,29 @@ prompt = PromptTemplate(template="{prompt}", input_variables=["prompt"])
 def make_api_call(messages, max_tokens, is_final_answer=False):
     # print('--- make_api_call ---\n-- messages:', json.dumps(messages, indent=4))
 
-    for attempt in range(3):
+    MAX_ATTEMPTS = 3
+    for attempt in range(MAX_ATTEMPTS):
         try:
             # Create a prompt content string
             prompt_content = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-            # print("-- prompt content:\n", prompt_content)
+            print("-- prompt content:\n", prompt_content)
 
             # Generate response
             response = llm_chain.invoke({"prompt": prompt_content})
             # print('-- raw response:\n', response)
 
+            # if it is not an array
+            if not isinstance(response, list):
+                response = [response]
+
             return response
         except Exception as e:
-            if attempt == 2:
+            if attempt == MAX_ATTEMPTS - 1:
                 if is_final_answer:
                     return {"title": "Error",
-                            "content": f"Failed to generate final answer after 3 attempts. Error: {str(e)}"}
+                            "content": f"Failed to generate final answer after {MAX_ATTEMPTS} attempts. Error: {str(e)}"}
                 else:
-                    return {"title": "Error", "content": f"Failed to generate step after 3 attempts. Error: {str(e)}",
+                    return {"title": "Error", "content": f"Failed to generate step after {MAX_ATTEMPTS} attempts. Error: {str(e)}",
                             "next_action": "final_answer"}
             time.sleep(1)  # Wait for 1 second before retrying
 
@@ -57,7 +62,7 @@ def generate_response(prompt):
 2. Elaborate on your thought process in the content section.
 3. Decide whether to continue reasoning or provide a final answer.
 
-Response Format:
+Response Format of Each Step:
 Use JSON with keys: 'title', 'content', 'next_action' (values: 'continue' or 'final_answer')
 
 Key Instructions:
@@ -72,7 +77,7 @@ Key Instructions:
 - Consider potential edge cases or exceptions to your reasoning.
 - Provide clear justifications for eliminating alternative hypotheses. 
 
-Example of a valid JSON response:
+Example of a valid JSON response containing multiple steps as a JSON array:
 ...json
 [{
     "title": "Initial Problem Analysis",
@@ -89,8 +94,9 @@ Example of a valid JSON response:
     ]
 
     steps = []
-    step_count = 1
+    step_count = 0
     total_thinking_time = 0
+    final_content = None
 
     while True:
         start_time = time.time()
@@ -99,32 +105,41 @@ Example of a valid JSON response:
         thinking_time = end_time - start_time
         total_thinking_time += thinking_time
 
-        final_answer = False
         for step_data in more_steps:
+            step_count += 1
+
             steps.append((f"Step {step_count}: {step_data['title']}", step_data['content'], thinking_time))
             messages.append({"role": "assistant", "content": json.dumps(step_data)})
 
             if step_data['next_action'] == 'final_answer':
-                final_answer = True
+                final_content = step_data['content']
                 break
-            step_count += 1
 
-        if final_answer:
+        if final_content != None:
             break
 
         # Yield after each step for Streamlit to update
         yield steps, None  # We're not yielding the total time until the end
 
     # Generate final answer
-    messages.append({"role": "user", "content": "Please provide the final answer based on your reasoning above."})
+    messages.append({"role": "user", "content": "Please provide the complete final answer based on your reasoning above."})
 
     start_time = time.time()
-    final_data = make_api_call(messages, 200, is_final_answer=True)
+    final_steps = make_api_call(messages, 200, is_final_answer=True)
+    # print('---------- final_steps:', json.dumps(final_steps))
     end_time = time.time()
     thinking_time = end_time - start_time
     total_thinking_time += thinking_time
 
-    steps.append(("Final Answer", final_data['content'], thinking_time))
+    for step_data in final_steps:
+        if step_data['next_action'] == 'final_answer':
+            final_content = step_data['content']
+            break
+        step_count += 1
+        steps.append((f"Step {step_count}: {step_data['title']}", step_data['content'], thinking_time))
+        messages.append({"role": "assistant", "content": json.dumps(step_data)})
+
+    steps.append(("Final Answer", final_content, thinking_time))
 
     yield steps, total_thinking_time
 
@@ -178,5 +193,11 @@ def debug_main(user_query):
             print(f"**Total thinking time: {total_thinking_time:.2f} seconds**")
 
 if __name__ == "__main__":
-    # debug_main("compare real number 3.11 and 3.8") # for testing
+    # debug_main("How many letters in word reasoning?") # for testing
     main()
+
+# testing question examples:
+# - Answer in Chinese: 农夫需要把狼、羊和白菜都带过河，但每次只能带一样物品，而且狼和羊不能单独相处，羊和白菜也不能单独相处，问农夫该如何过河？
+# - Compare two real numbers: 7.11 and 7.5
+# - How many letters in word xxx?
+# - How many letter r in word xxx?
