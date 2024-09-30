@@ -2,7 +2,9 @@ import streamlit as st
 import json
 import time
 import os
-from langchain import PromptTemplate, LLMChain
+
+from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import AzureChatOpenAI
 
 # Initialize the LLM
@@ -11,24 +13,32 @@ llm = AzureChatOpenAI(
     openai_api_version = os.getenv("API_VERSION"),
     deployment_name = os.getenv("DEPLOYMENT_NAME"),
     openai_api_key = os.getenv("API_KEY"),
-    temperature = 0
+    temperature = 0.2
 )
 
+# Create a prompt template for LangChain
+prompt = PromptTemplate(template="{prompt}", input_variables=["prompt"])
+
+# Create a LangChain pipeline
+llm_chain = prompt | llm | JsonOutputParser()
+
+# Create a prompt template for LangChain
+prompt = PromptTemplate(template="{prompt}", input_variables=["prompt"])
+
 def make_api_call(messages, max_tokens, is_final_answer=False):
+    # print('--- make_api_call ---\n-- messages:', json.dumps(messages, indent=4))
+
     for attempt in range(3):
         try:
-            # Create a prompt template for LangChain
-            prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-            template = PromptTemplate(template="{prompt}", input_variables=["prompt"])
+            # Create a prompt content string
+            prompt_content = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            # print("-- prompt content:\n", prompt_content)
 
-            # Set up LLMChain with the OpenAI model and the prompt
-            llm_chain = LLMChain(llm=llm, prompt=template)
+            # Generate response
+            response = llm_chain.invoke({"prompt": prompt_content})
+            # print('-- raw response:\n', response)
 
-            # Generate response using LLMChain
-            response = llm_chain.run({"prompt": prompt})
-
-            # Parse response as JSON (assuming it's properly structured)
-            return json.loads(response)
+            return response
         except Exception as e:
             if attempt == 2:
                 if is_final_answer:
@@ -63,12 +73,16 @@ Key Instructions:
 - Provide clear justifications for eliminating alternative hypotheses. 
 
 Example of a valid JSON response:
-```json
-{
+...json
+[{
     "title": "Initial Problem Analysis",
     "content": "To approach this problem effectively, I'll first break down the given information into key components. This involves identifying...[detailed explanation]... By structuring the problem this way, we can systematically address each aspect.",
     "next_action": "continue"
-}```"""},
+},
+...
+]
+...
+"""},
         {"role": "user", "content": prompt},
         {"role": "assistant",
          "content": "Thank you! I will now think step by step following my instructions, starting at the beginning after decomposing the problem."}
@@ -80,19 +94,23 @@ Example of a valid JSON response:
 
     while True:
         start_time = time.time()
-        step_data = make_api_call(messages, 300)
+        more_steps = make_api_call(messages, 300)
         end_time = time.time()
         thinking_time = end_time - start_time
         total_thinking_time += thinking_time
 
-        steps.append((f"Step {step_count}: {step_data['title']}", step_data['content'], thinking_time))
+        final_answer = False
+        for step_data in more_steps:
+            steps.append((f"Step {step_count}: {step_data['title']}", step_data['content'], thinking_time))
+            messages.append({"role": "assistant", "content": json.dumps(step_data)})
 
-        messages.append({"role": "assistant", "content": json.dumps(step_data)})
+            if step_data['next_action'] == 'final_answer':
+                final_answer = True
+                break
+            step_count += 1
 
-        if step_data['next_action'] == 'final_answer':
+        if final_answer:
             break
-
-        step_count += 1
 
         # Yield after each step for Streamlit to update
         yield steps, None  # We're not yielding the total time until the end
@@ -116,8 +134,7 @@ def main():
     st.title("Using LangChain to create reasoning chains")
 
     st.markdown("""
-    This is a prototype using LangChain's OpenAI model to create reasoning chains for improved output accuracy. 
-    The accuracy has not been formally evaluated yet.
+    This is a prototype using LangChain's AzureChatOpenAI model to create reasoning chains for improved output accuracy.
     """)
 
     # Text input for user query
@@ -145,5 +162,21 @@ def main():
             if total_thinking_time is not None:
                 time_container.markdown(f"**Total thinking time: {total_thinking_time:.2f} seconds**")
 
+def debug_main(user_query):
+    # Generate and display the response
+    for steps, total_thinking_time in generate_response(user_query):
+        for i, (title, content, thinking_time) in enumerate(steps):
+            if title.startswith("Final Answer"):
+                print(f"### {title}")
+                print(content.replace('\n', '<br>'))
+            else:
+                with st.expander(title, expanded=True):
+                    print(content.replace('\n', '<br>'))
+
+        # Only show total time when it's available at the end
+        if total_thinking_time is not None:
+            print(f"**Total thinking time: {total_thinking_time:.2f} seconds**")
+
 if __name__ == "__main__":
+    # debug_main("compare real number 3.11 and 3.8") # for testing
     main()
